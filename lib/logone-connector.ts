@@ -163,23 +163,16 @@ Onde:
 - volume_tons deve usar QUANTIDADE_PROCESSO
 - produto deve ser "soja" ou "milho" em letras minúsculas`;
 
-  // Tenta endpoint de chat
-  const endpoints = [
-    { url: `/api/threads/${threadId}/messages`, body: { role: "user", content: prompt } },
-    { url: `/api/chat`, body: { thread_id: threadId, message: prompt, role: "user" } },
-    { url: `/api/chat.json`, body: { thread_id: threadId, content: prompt } },
-  ];
+  // Endpoint correto identificado via Network tab
+  const res = await fetch(`${BASE}/api/invocations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: cookie },
+    body: JSON.stringify({ thread_id: threadId, prompt }),
+  });
 
-  for (const ep of endpoints) {
-    const res = await fetch(`${BASE}${ep.url}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: cookie },
-      body: JSON.stringify(ep.body),
-    });
-    if (res.ok) return;
+  if (!res.ok) {
+    throw new Error(`Erro ao enviar prompt: status ${res.status}`);
   }
-
-  throw new Error("Não foi possível enviar o prompt para o tgsa-ai.");
 }
 
 // ────────────────────────────────────────────
