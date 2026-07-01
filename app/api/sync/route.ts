@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
       entradas_gravadas: resultado.entradas_gravadas,
       saidas_gravadas: resultado.saidas_gravadas,
       registros_duplicados: resultado.duplicados,
-      erro_mensagem: resultado.erros.length > 0 ? resultado.erros.join("; ") : null,
+      erro_mensagem: resultado.erros.length > 0 ? resultado.erros.join("; ") : undefined,
       resposta_raw: rawJson,
     });
 
