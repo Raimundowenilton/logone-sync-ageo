@@ -10,8 +10,8 @@
  */
 
 const BASE = "https://tgsa-ai.vercel.app";
-const MAX_POLL_MS = 180_000;  // 3 minutos de espera máxima
-const POLL_INTERVAL_MS = 5_000; // verifica a cada 5 segundos
+const MAX_POLL_MS = 300_000;  // 5 minutos de espera máxima
+const POLL_INTERVAL_MS = 8_000; // verifica a cada 8 segundos
 
 export type LogoneEntrada = {
   identificador: string;
@@ -109,11 +109,11 @@ async function criarThread(cookie: string): Promise<string> {
 // ────────────────────────────────────────────
 // 3. ENVIAR MENSAGEM COM PROMPT
 // ────────────────────────────────────────────
-async function enviarPrompt(
+async function enviarPromptEAguardar(
   cookie: string,
   threadId: string,
   diasAtras: number
-): Promise<void> {
+): Promise<string> {
   const hoje = new Date();
   const de = new Date(hoje);
   de.setDate(de.getDate() - diasAtras);
@@ -163,7 +163,7 @@ Onde:
 - volume_tons deve usar QUANTIDADE_PROCESSO
 - produto deve ser "soja" ou "milho" em letras minúsculas`;
 
-  // Endpoint correto identificado via Network tab
+  // Envia o prompt
   const res = await fetch(`${BASE}/api/invocations`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Cookie: cookie },
@@ -173,6 +173,26 @@ Onde:
   if (!res.ok) {
     throw new Error(`Erro ao enviar prompt: status ${res.status}`);
   }
+
+  // Tenta ler resposta streaming (text/event-stream ou texto direto)
+  const contentType = res.headers.get("content-type") ?? "";
+  if (contentType.includes("text/event-stream") || contentType.includes("text/plain")) {
+    const texto = await res.text();
+    if (texto && texto.trim().length > 10) {
+      // Remove prefixos SSE como "data: "
+      const limpo = texto
+        .split("\n")
+        .filter(l => l.startsWith("data: "))
+        .map(l => l.replace("data: ", ""))
+        .join("")
+        .trim();
+      if (limpo.length > 10) return limpo;
+      if (texto.trim().length > 10) return texto.trim();
+    }
+  }
+
+  // Se não veio streaming, aguarda via polling
+  return aguardarResposta(cookie, threadId);
 }
 
 // ────────────────────────────────────────────
@@ -313,11 +333,8 @@ export async function buscarDadosLogone(
   console.log("[Logone] Criando thread...");
   const threadId = await criarThread(cookie);
 
-  console.log("[Logone] Enviando prompt de extração...");
-  await enviarPrompt(cookie, threadId, diasAtras);
-
-  console.log("[Logone] Aguardando resposta da IA...");
-  const rawJson = await aguardarResposta(cookie, threadId);
+  console.log("[Logone] Enviando prompt e aguardando resposta...");
+  const rawJson = await enviarPromptEAguardar(cookie, threadId, diasAtras);
 
   console.log("[Logone] Parseando resposta...");
   const dados = parsearResposta(rawJson);
