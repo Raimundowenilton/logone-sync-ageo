@@ -10,8 +10,8 @@
  */
 
 const BASE = "https://tgsa-ai.vercel.app";
-const MAX_POLL_MS = 90_000;   // 90 segundos de espera máxima
-const POLL_INTERVAL_MS = 3_000; // verifica a cada 3 segundos
+const MAX_POLL_MS = 180_000;  // 3 minutos de espera máxima
+const POLL_INTERVAL_MS = 5_000; // verifica a cada 5 segundos
 
 export type LogoneEntrada = {
   identificador: string;
@@ -183,6 +183,7 @@ async function aguardarResposta(
   threadId: string
 ): Promise<string> {
   const inicio = Date.now();
+  let ultimaMsgId = "";
 
   while (Date.now() - inicio < MAX_POLL_MS) {
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
@@ -195,30 +196,35 @@ async function aguardarResposta(
     if (!res.ok) continue;
 
     const mensagens: any[] = await res.json();
+    if (!Array.isArray(mensagens) || mensagens.length === 0) continue;
 
-    // Busca a última mensagem do assistente que não seja tool_call puro
-    const assistantMsgs = mensagens
-      .filter((m) => m?.message?.role === "assistant")
-      .sort((a, b) =>
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      );
+    // Ordena por data crescente e pega a última mensagem do assistente
+    const ordenadas = [...mensagens].sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
 
-    for (const msg of assistantMsgs) {
+    for (const msg of ordenadas.reverse()) {
+      // Pula se já processamos essa mensagem
+      if (msg.message_id === ultimaMsgId) break;
+
+      const role = msg?.message?.role;
+      if (role !== "assistant") continue;
+
       const content = msg?.message?.content ?? [];
+
       for (const block of content) {
-        // Texto final sem tool_call pendente
-        if (block.type === "text" && block.text?.trim().startsWith("{")) {
+        // Bloco de texto final (sem tool_calls pendentes)
+        if (block.type === "ai" && block.text && !block.tool_calls?.length) {
+          const texto = block.text.trim();
+          if (texto.length > 10) {
+            ultimaMsgId = msg.message_id;
+            return texto;
+          }
+        }
+        // Bloco de texto puro
+        if (block.type === "text" && block.text?.trim().length > 10) {
+          ultimaMsgId = msg.message_id;
           return block.text.trim();
-        }
-        if (block.type === "ai" && !block.tool_calls?.length && block.text?.includes("{")) {
-          // Extrai JSON do texto
-          const match = block.text.match(/\{[\s\S]*\}/);
-          if (match) return match[0];
-        }
-        // Resultado de tool_result com JSON
-        if (block.type === "tool_result" && typeof block.content === "string") {
-          const match = block.content.match(/\{[\s\S]*\}/);
-          if (match) return match[0];
         }
       }
     }
@@ -233,13 +239,31 @@ async function aguardarResposta(
 // 5. PARSE DO JSON RETORNADO
 // ────────────────────────────────────────────
 function parsearResposta(raw: string): LogoneData {
-  // Remove possíveis marcadores de markdown
-  const limpo = raw
-    .replace(/```json\n?/g, "")
-    .replace(/```\n?/g, "")
-    .trim();
+  // Tenta extrair JSON de dentro do texto (pode vir com markdown ou texto ao redor)
+  let jsonStr = raw.trim();
 
-  const parsed = JSON.parse(limpo);
+  // Remove blocos de código markdown
+  jsonStr = jsonStr.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+
+  // Se não começa com {, tenta encontrar um bloco JSON no texto
+  if (!jsonStr.startsWith("{")) {
+    const match = jsonStr.match(/\{[\s\S]*\}/);
+    if (match) {
+      jsonStr = match[0];
+    } else {
+      // Resposta veio como texto, não como JSON — cria estrutura vazia com log
+      console.warn("[Logone] Resposta não contém JSON. Resposta recebida:", raw.slice(0, 200));
+      return {
+        data_sync: new Date().toISOString(),
+        periodo: { de: "", ate: "" },
+        entradas: [],
+        saidas: [],
+        estoque_atual: [],
+      };
+    }
+  }
+
+  const parsed = JSON.parse(jsonStr);
 
   // Normaliza campos para garantir compatibilidade
   return {
