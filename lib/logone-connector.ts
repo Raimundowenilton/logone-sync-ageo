@@ -57,51 +57,35 @@ async function autenticar(): Promise<string> {
     );
   }
 
-  // Tenta endpoints comuns de sign-in do tgsa-ai
-  const endpoints = [
-    "/api/auth/sign-in",
-    "/api/auth/signin",
-    "/api/sign-in",
-  ];
+  const res = await fetch(`${BASE}/api/auth/sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
 
-  for (const endpoint of endpoints) {
-    try {
-      const res = await fetch(`${BASE}${endpoint}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-
-      if (res.ok) {
-        // Extrai cookie de sessão
-        const setCookie = res.headers.get("set-cookie");
-        if (setCookie) {
-          // Pega só o token/session da string de cookie
-          const cookieValue = setCookie
-            .split(";")
-            .map((p) => p.trim())
-            .find((p) => !p.startsWith("Path") && !p.startsWith("HttpOnly") && !p.startsWith("Secure") && !p.startsWith("SameSite") && !p.startsWith("Max-Age") && !p.startsWith("Expires"))
-            ?? setCookie.split(";")[0];
-          return cookieValue;
-        }
-
-        // Tenta pegar token do body
-        const body = await res.json().catch(() => ({}));
-        const token =
-          body?.access_token ??
-          body?.token ??
-          body?.session?.access_token ??
-          null;
-        if (token) return `Bearer ${token}`;
-      }
-    } catch {
-      // Tenta próximo endpoint
-    }
+  if (!res.ok) {
+    throw new Error(
+      `Falha na autenticação tgsa-ai: status ${res.status}. Verifique TGSA_EMAIL e TGSA_PASSWORD.`
+    );
   }
 
-  throw new Error(
-    "Não foi possível autenticar no tgsa-ai. Verifique TGSA_EMAIL e TGSA_PASSWORD."
-  );
+  // Extrai cookie de sessão do header set-cookie
+  const setCookie = res.headers.get("set-cookie");
+  if (setCookie) {
+    return setCookie.split(";")[0];
+  }
+
+  // Tenta pegar token do body
+  const body = await res.json().catch(() => ({}));
+  const token =
+    body?.access_token ??
+    body?.token ??
+    body?.session?.access_token ??
+    null;
+
+  if (token) return `Bearer ${token}`;
+
+  throw new Error("Autenticação bem-sucedida mas sem cookie/token na resposta.");
 }
 
 // ────────────────────────────────────────────
